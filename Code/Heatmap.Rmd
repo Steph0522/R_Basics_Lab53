@@ -1,0 +1,159 @@
+---
+title: "HEATMAP"
+author: "by Steph and Ale"
+output:
+  html_document:
+    theme: readable
+    highlight: haddock
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+bibliography: references.bib
+---
+
+# 
+
+This script is to generate, explore and visualize a heatmap of relative abundance with transformed data using 'pheatmap' package [@kolde2015package].
+
+In this tutorial , Let's use the same test data used in the previous script (PCA)[^1]. For this purpose Let's load the data and Libraries that it is will be used.
+
+[^1]: Data provided from Ph D Alejandra Miranda of her experiment (real data)
+
+# Libraries
+
+```{r Libraries, message=FALSE, warning=FALSE, include=TRUE}
+library(ALDEx2)
+library(CoDaSeq)
+library(tibble)
+library (dplyr)
+library(pheatmap)
+library(propr)
+library(vegan)
+library(tidyr)
+
+
+```
+
+# Data
+
+\
+1. Load data from a tsv file using *read.delim*\
+2. Rename data to a shorter name\
+3. Visualizing data (only a portion)\
+
+```{r, warning=FALSE}
+soil_species <- read.delim("../Data/soil_species_bacteria.txt", 
+                           row.names=1, check.names = FALSE)
+soil <- soil_species
+head(soil[,1:3], 5)
+
+metadata <- read.delim("../Data/soil_maize_metadata.txt", check.names = FALSE,
+                       header = TRUE, row.names = 1)
+head(metadata, 5)
+metadata <- data.frame(t(metadata), check.names = FALSE)
+head (metadata[,1:3], 5)
+
+#Make a column with the sum of every sample
+soil$sum <- rowSums(soil)
+tail(rev(soil)[1])
+soil <- soil[order(-soil$sum),]
+head(rev(soil)[1])
+soil <- soil[-37]
+head(rev(soil)[1])
+soil <- soil[1:50,] 
+
+soil <- data.frame(t(soil))
+metadata <- data.frame(t(metadata))
+
+data <- merge(metadata, soil, by=0, all=TRUE)
+
+##CONCATENATE VARIABLES (SUBSTRAUM/PERIOD)
+
+data <- unite(data, till_nit,c(4,5), sep=";")
+data <- data[,c(-1,-2,-3,-5)]
+
+data <- data %>% group_by(till_nit) %>% summarise_all(funs(sum))
+row.names(data) <- data$till_nit
+data <- data.frame(data)
+data <- data [-1]
+head(data[,1:3], 2)
+data <- data.frame(t(data))
+
+```
+
+# Data Transformation
+
+```{r}
+# Compostinal analyses ----------------------------------------------------
+#Generate the aldex object for Expectued values (variables)
+conds <- c(rep("cond1", 2), rep("cond2", 2))
+
+#Estimate the distribution of CLR values
+data.x <- aldex.clr(data, conds, mc.samples=256, verbose=FALSE)
+
+##Estimate expected values of effect sizes
+data.e <- aldex.effect(data.x, include.sample.summary = TRUE, verbose = FALSE)
+
+#use for ordination and dendogram
+E.E.clr <- t(data.e[,grep("rab.sample", colnames(data.e))])
+rownames(E.E.clr) <- gsub("rab.sample.", "", rownames(E.E.clr))
+exp <- apply(E.E.clr,1,function(x)2^x)
+E.clr <- t(apply(exp,2,function(x)log2(x)-mean(log2(x))))
+
+E.clr <- data.frame(t(E.clr))
+
+head(E.clr[,1:2], 5)
+
+```
+
+# Setting ranks and Visualizing
+
+```{r}
+# Heatmap -----------------------------------------------------------------
+
+min(E.clr)   ###Para ver cantidad minima y tomar en cuenta para mutar valores
+max(E.clr)   ###Cantidad maxima
+
+E.clr_heat <-E.clr %>% rownames_to_column( var = "treatments")
+head(E.clr_heat[,1:2])
+
+#Cambiar valores de columnas que tienen "_" por los asignados
+#(se puede poner cualquier simbolo que coincida con los nombres de las col)
+
+E.clr_heat2 <-E.clr_heat%>% mutate_at(vars(contains(".")), funs(R = case_when(
+    . > -1.5 & .  <= -1.0 ~ 0,
+  . >  -1.0 & .  <= -0.5 ~ 1,
+  . >  -0.5 & .  <= 0 ~ 2,
+  . >  0 & .  <= 0.5 ~ 3,
+  . >  0.5 & .  <= 1 ~ 4,
+  . >  1 & .  <= 1.5 ~ 5,
+  . >  1.5 & .  <= 2 ~ 6,
+  . >  2 & .  <= 2.5 ~ 7,
+  . >  2.5 ~ 8)))
+
+#Regresar la primer columna, que contiene los phyla, como nombre de filas y no como columna
+row.names(E.clr_heat2) <-E.clr_heat2$treatments
+
+#Remove columns without mutations
+E.clr_heat3 <- E.clr_heat2[-1:-5]
+
+#Add row with scsoil
+colnames(E.clr_heat3)
+
+E.clr_heat3_esc <- add_row(E.clr_heat3, No.No_R = 0, No.Yes_R = 4, Yes.Yes_R = 8, .before = 1,)
+
+
+#File with color palette for heatmap
+my_palette <- colorRampPalette(c("white", "yellow", "red"))(n=599)
+ale_colors <- colorRampPalette(c("white", "lightgoldenrod1", "darksalmon" ,"coral2", "maroon4"))(n=599)
+
+#Heatmap
+pheatmap(E.clr_heat3_esc, color = ale_colors, main="Heat map", cluster_cols = T, cluster_rows = F, fontsize = 7, clustering_distance_cols = "euclidean")
+ 
+
+```
+
+## **References**
+
+::: {#refs}
+:::
